@@ -14,16 +14,18 @@ typedef enum {
 
 /* The Context Struct: Holds the current reality of Elevator A */
 typedef struct {
-    volatile ElevatorState_t currentState;
-    volatile uint8 currentFloor;
-    volatile uint8 targetFloor;
-} ElevatorContext_t;
+    volatile ElevatorState_t  currentState;
+    volatile uint8            currentFloor;
+    volatile uint8            targetFloor;
+} ElevatorContextA_t;
 
 /* Public API */
 void ElevatorA_Init(void);
 void ElevatorA_RunFSM(void);
 
 /* Getter so SPI can read the state*/
-ElevatorContext_t ElevatorA_GetContext(void);
+ElevatorContextA_t ElevatorA_GetContext(void);
+
+void ElevatorA_SetTargetFloor(uint8 target);
 
 #endif /* ELEVATOR_H */

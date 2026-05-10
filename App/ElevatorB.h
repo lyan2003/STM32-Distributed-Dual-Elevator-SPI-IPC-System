@@ -14,9 +14,9 @@ typedef enum {
 
 /* Context Struct for Board B */
 typedef struct {
-    volatile ElevatorStateB_t currentState;
-    volatile uint8 currentFloor;
-    volatile uint8 targetFloor;
+    volatile ElevatorStateB_t  currentState;
+    volatile uint8            currentFloor;
+    volatile uint8            targetFloor;
 } ElevatorContextB_t;
 
 /* Public API */
