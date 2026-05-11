@@ -19,7 +19,26 @@ set(STARTUP_BASE_DIR                     ${PROJECT_PATH}/STM32-base/startup/)
 set(EXECUTABLE                           ${CMAKE_PROJECT_NAME})
 
 # Executable files
-add_executable(${EXECUTABLE} ${SOURCE_LIST} ${STARTUP_BASE_DIR}/${SERIES_FOLDER}/${MAPPED_DEVICE}.s)
+add_executable(${EXECUTABLE} ${SOURCE_LIST} ${STARTUP_BASE_DIR}/${SERIES_FOLDER}/${MAPPED_DEVICE}.s
+        Drivers/Spi/Spi.h
+        Drivers/Spi/Spi.c
+        Drivers/UART/Usart.h
+        Drivers/UART/Usart.c
+        Drivers/DMA/Dma.c
+        Drivers/DMA/Dma_Private.h
+        Drivers/DMA/Dma.h
+        RingBuffer/RingBuffer.c
+        RingBuffer/RingBuffer.h
+        RingBuffer/RingBuffer.h
+        Drivers/Telemetry/Telemetry.c
+        Drivers/Telemetry/Telemetry.h
+        App/ElevatorB.c
+        App/ElevatorB.h
+        Drivers/IPC/Ipc.c
+        Drivers/IPC/Ipc.h
+        CollaborativeLogic/MasterLogic.c
+        CollaborativeLogic/MasterLogic.h
+)
 # Include
 target_include_directories(${EXECUTABLE} PUBLIC ${INCLUDE_LIST})
 # Project symbols

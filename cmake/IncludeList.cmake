@@ -11,7 +11,15 @@ set(INCLUDE_LIST ${INCLUDE_LIST}
         ${PROJECT_PATH}/Drivers/Timer
         ${PROJECT_PATH}/Drivers/Pwm
         ${PROJECT_PATH}/Drivers/Exti
+        ${PROJECT_PATH}/Drivers/Spi
+        ${PROJECT_PATH}/Drivers/UART
+        ${PROJECT_PATH}/Drivers/DMA
+        ${PROJECT_PATH}/Drivers/Telemetry
+        ${PROJECT_PATH}/Drivers/IPC
+        ${PROJECT_PATH}/src/main
         ${PROJECT_PATH}/App
+        ${PROJECT_PATH}/CollaborativeLogic
+        ${PROJECT_PATH}/RingBuffer
 
 
 )

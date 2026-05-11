@@ -14,4 +14,16 @@ typedef double              float64;        /* 2.2250738585072015e-308 to 1.7976
 
 typedef unsigned char       boolean;        /* for use with TRUE/FALSE        */
 
+#ifndef TRUE
+#define TRUE  1
+#endif
+
+#ifndef FALSE
+#define FALSE 0
+#endif
+
+#ifndef NULL
+#define NULL  ((void *)0)
+#endif
+
 #endif /* STD_TYPES_H */

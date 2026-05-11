@@ -9,6 +9,7 @@
 #define GPIO_B     'B'
 #define GPIO_C     'C'
 #define GPIO_D     'D'
+#define GPIO_E     'E'
 
 
 /*PinMode*/

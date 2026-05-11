@@ -8,6 +8,7 @@
 #define TIMER3    3U
 #define TIMER4    4U
 #define TIMER5    5U
+#define TIMER9    9U
 
 #define CH1  1U
 #define CH2  2U
