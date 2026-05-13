@@ -60,6 +60,7 @@ target_link_options(${EXECUTABLE} PRIVATE
         -Xlinker --gc-sections
         -Wl,-Map=${CMAKE_PROJECT_NAME}.map
         --specs=nano.specs
+        --specs=nosys.specs
         #-u _printf_float                # STDIO float formatting support
 )
 
