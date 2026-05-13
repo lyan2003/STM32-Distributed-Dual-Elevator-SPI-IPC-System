@@ -40,6 +40,8 @@ void Usart1_Init(void) {
     /* Enable USART1 */
     USART1->CR1 |= (1 << USART_CR1_UE_Pos);
 
+    USART1->CR3 |= (1 << 7); // Enable DMAT bit
+
 }
 
 uint8 Usart1_TransmitByte(uint8 Byte) {
