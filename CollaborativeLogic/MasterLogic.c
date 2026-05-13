@@ -1,9 +1,10 @@
 #include "MasterLogic.h"
 #include "elevator.h"
 #include "Ipc.h"
-#include "Usart.h"
 #include <stdlib.h>
 #include "stm32f401xe.h"
+#include "Dma.h"
+#include <string.h>
 
 /* ========================================== */
 /* External IPC Packet                        */
@@ -25,11 +26,21 @@ extern IpcPacket_t MasterTxPacket;
  *
  * Index = floor number
  * Value = direction
- *         1  -> Up
- *        -1  -> Down
- *         0  -> No pending request
+ * 1  -> Up
+ * -1  -> Down
+ * 0  -> No pending request
  */
-int PendingCalls[5] = {0};
+static int PendingCalls[5] = {0};
+
+/* DMA Logging Helper  */
+static void MasterLog_DMA(const char* msg)
+{
+    /* Only transmit if the DMA stream is idle to prevent collisions */
+    if (Dma_IsTransferComplete(DMA_ID_2, 7)) {
+        Dma_StartTransfer(DMA_ID_2, 7, (uint32)msg, strlen(msg));
+        USART1->DR = '\r';
+    }
+}
 
 /* ========================================== */
 /* Initialization                             */
@@ -121,7 +132,7 @@ void MasterLogic_DispatchCall(uint8 call_floor,
 
     if (!isLinkOk) {
 
-        Usart1_TransmitString(
+        MasterLog_DMA(
             ">>> EVENT: [CASE 1] COMM FAULT! "
             "Master acting alone.\r\n"
         );
@@ -140,7 +151,7 @@ void MasterLogic_DispatchCall(uint8 call_floor,
     if (ctxA.currentState == 0 &&
         ctxA.currentFloor == call_floor) {
 
-        Usart1_TransmitString(
+        MasterLog_DMA(
             ">>> EVENT: [CASE 2] IMMEDIATE MATCH "
             "(A is already here)\r\n"
         );
@@ -154,7 +165,7 @@ void MasterLogic_DispatchCall(uint8 call_floor,
     if (rxPktB.State == 0 &&
         rxPktB.CurrentFloor == call_floor) {
 
-        Usart1_TransmitString(
+        MasterLog_DMA(
             ">>> EVENT: [CASE 2] IMMEDIATE MATCH "
             "(B is already here)\r\n"
         );
@@ -166,9 +177,9 @@ void MasterLogic_DispatchCall(uint8 call_floor,
     }
 
     /* ======================================
-     * CASE 3: Perfect Match
-     * Elevator moving in same direction
-     * ====================================== */
+         * CASE 3: Perfect Match
+         * Elevator moving in same direction
+         * ====================================== */
 
     uint8 matchA =
         Is_Perfect_Match(ctxA.currentState,
@@ -185,7 +196,7 @@ void MasterLogic_DispatchCall(uint8 call_floor,
     /* Only Elevator A matches */
     if (matchA && !matchB) {
 
-        Usart1_TransmitString(
+        MasterLog_DMA(
             ">>> EVENT: [CASE 3] PERFECT MATCH "
             "(A taking call on its way)\r\n"
         );
@@ -199,7 +210,7 @@ void MasterLogic_DispatchCall(uint8 call_floor,
     /* Only Elevator B matches */
     else if (!matchA && matchB) {
 
-        Usart1_TransmitString(
+        MasterLog_DMA(
             ">>> EVENT: [CASE 3] PERFECT MATCH "
             "(B taking call on its way)\r\n"
         );
@@ -213,62 +224,41 @@ void MasterLogic_DispatchCall(uint8 call_floor,
     /* Both elevators match */
     else if (matchA && matchB) {
 
-        Usart1_TransmitString(
-            ">>> EVENT: [CASE 3] PERFECT MATCH "
-            "(Both Match! Calculating distance...)\r\n"
-        );
-
-        /* Select nearest elevator */
+        /* Select nearest elevator and print as ONE single string! */
         if (abs((int)ctxA.currentFloor - call_floor) <=
             abs((int)rxPktB.CurrentFloor - call_floor)) {
 
-            Usart1_TransmitString(
-                ">>> EVENT: A is closer.\r\n"
+            MasterLog_DMA(
+                ">>> EVENT: [CASE 3] PERFECT MATCH "
+                "(Both Match! A is closer & dispatched)\r\n"
             );
 
             ElevatorA_SetTargetFloor(call_floor);
 
-        } else {
+            } else {
 
-            Usart1_TransmitString(
-                ">>> EVENT: B is closer.\r\n"
-            );
+                MasterLog_DMA(
+                    ">>> EVENT: [CASE 3] PERFECT MATCH "
+                    "(Both Match! B is closer & dispatched)\r\n"
+                );
 
-            MasterTxPacket.TargetFloor = call_floor;
-        }
+                MasterTxPacket.TargetFloor = call_floor;
+            }
 
         __enable_irq();
         return;
     }
 
     /* ======================================
-     * CASE 6: Nearest Idle Elevator
-     * ====================================== */
-
-    if (ctxA.currentState == 0 &&
-        rxPktB.State == 0) {
-
-        Usart1_TransmitString(
-            ">>> EVENT: [CASE 6] NEAREST IDLE "
-            "(Both IDLE! Calculating distance...)\r\n"
-        );
-
-        /* Choose nearest idle elevator */
-        if (abs((int)ctxA.currentFloor - call_floor) <=
-            abs((int)rxPktB.CurrentFloor - call_floor)) {
-
-            Usart1_TransmitString(
-                ">>> EVENT: A dispatched.\r\n"
-            );
-
+         * CASE 6: Nearest Idle Elevator
+         * ====================================== */
+    if (ctxA.currentState == 0 && rxPktB.State == 0) {
+        if (abs((int)ctxA.currentFloor - call_floor) <= abs((int)rxPktB.CurrentFloor - call_floor)) {
+            MasterLog_DMA(">>> EVENT: [CASE 6] NEAREST IDLE (Both IDLE! A is closer & dispatched)\r\n");
             ElevatorA_SetTargetFloor(call_floor);
 
         } else {
-
-            Usart1_TransmitString(
-                ">>> EVENT: B dispatched.\r\n"
-            );
-
+            MasterLog_DMA(">>> EVENT: [CASE 6] NEAREST IDLE (Both IDLE! B is closer & dispatched)\r\n");
             MasterTxPacket.TargetFloor = call_floor;
         }
 
@@ -279,7 +269,7 @@ void MasterLogic_DispatchCall(uint8 call_floor,
     /* Only Elevator A is idle */
     else if (ctxA.currentState == 0) {
 
-        Usart1_TransmitString(
+        MasterLog_DMA(
             ">>> EVENT: [CASE 6] NEAREST IDLE "
             "(A dispatched)\r\n"
         );
@@ -293,7 +283,7 @@ void MasterLogic_DispatchCall(uint8 call_floor,
     /* Only Elevator B is idle */
     else if (rxPktB.State == 0) {
 
-        Usart1_TransmitString(
+        MasterLog_DMA(
             ">>> EVENT: [CASE 6] NEAREST IDLE "
             "(B dispatched)\r\n"
         );
@@ -309,7 +299,7 @@ void MasterLogic_DispatchCall(uint8 call_floor,
      * Passed Match / Opposite Direction
      * ====================================== */
 
-    Usart1_TransmitString(
+    MasterLog_DMA(
         ">>> EVENT: [CASE 4/5] PASSED OR "
         "OPPOSITE DIR (Added to Pending Queue)\r\n"
     );
@@ -325,7 +315,7 @@ void MasterLogic_DispatchCall(uint8 call_floor,
 
 /**
  * @brief Check pending requests and dispatch
- *        them when an elevator becomes idle.
+ * them when an elevator becomes idle.
  */
 void MasterLogic_Update(void)
 {

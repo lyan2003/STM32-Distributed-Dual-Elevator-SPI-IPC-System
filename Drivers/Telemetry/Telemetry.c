@@ -43,7 +43,7 @@ void Telemetry_Init(uint8 isMasterFlag)
     Rcc_Enable(RCC_GPIOA);
     Rcc_Enable(RCC_USART1);
 
-    /* === Modification: Force enable DMA2 clock === */
+    /* Force enable DMA2 clock */
     RCC->AHB1ENR |= (1 << 22);
 
     /* 2. Configure USART Pins (PA9 = TX, PA10 = RX) */
@@ -56,27 +56,19 @@ void Telemetry_Init(uint8 isMasterFlag)
     /* 3. Initialize USART */
     Usart1_Init();
 
-    /* === Modification: Enable UART to use DMA === */
+    /* Enable UART to use DMA */
     USART1->CR3 |= (1 << 7); /* Enable DMAT (DMA Transmit Enable) bit */
 
-    /* 4. Initialize DMA Stream */
+    /* 4. Initialize DMA Stream using Custom Driver */
     Dma_InitStream(&UartTxDma);
 
-    /* 5. Startup Message using DMA */
+    /* 5. Startup Message using DMA Driver */
     sprintf(Telemetry_Buffer, "\r\n================================\r\n=== %s MCU STARTUP OK! ===\r\n================================\r\n",
             isMasterFlag ? "MASTER" : "SLAVE ");
 
-    DMA2_Stream7->CR &= ~1;               /* 1. Disable DMA to allow configuration changes */
-    while(DMA2_Stream7->CR & 1);          /* Wait until it is effectively disabled */
-
-    DMA2->HIFCR = (0x3D << 22);           /* 2. Clear all old flags (Crucial to prevent DMA from hanging) */
-
-    DMA2_Stream7->M0AR = (uint32)Telemetry_Buffer; /* 3. Buffer address */
-    DMA2_Stream7->NDTR = strlen(Telemetry_Buffer); /* 4. Message length */
-
-    USART1->DR = '\r';                    /* 5. Proteus workaround: Send dummy byte without blocking the CPU */
-
-    DMA2_Stream7->CR |= 1;                /* 6. Start the DMA! */
+    /* Start the initial transfer */
+    Dma_StartTransfer(DMA_ID_2, 7, (uint32)Telemetry_Buffer, strlen(Telemetry_Buffer));
+    USART1->DR = '\r'; /* Proteus workaround */
 }
 
 /* ------------------------------------------------------------------ */
@@ -85,10 +77,9 @@ void Telemetry_Init(uint8 isMasterFlag)
 
 void Telemetry_Run(uint8 isMasterFlag)
 {
-    /* Guard: Check if DMA is currently busy.
-     * This protects against memory corruption while transferring!
-     */
-    if (DMA2_Stream7->CR & 1)
+    /* Guard: Check if DMA is currently busy using the Custom Driver */
+    /* If the transfer is NOT complete (still busy), return instantly */
+    if (!Dma_IsTransferComplete(DMA_ID_2, 7))
     {
         return;
     }
@@ -145,14 +136,9 @@ void Telemetry_Run(uint8 isMasterFlag)
                 GetStateStr(rxPkt.State), rxPkt.CurrentFloor, rxPkt.TargetFloor,
                 current_link ? "OK" : "FAULT");
 
-            /* Start DMA for the MASTER (Your exact working code) */
-            DMA2_Stream7->CR &= ~1;
-            while(DMA2_Stream7->CR & 1);
-            DMA2->HIFCR = (0x3D << 22); /* Clear flags */
-            DMA2_Stream7->M0AR = (uint32)Telemetry_Buffer;
-            DMA2_Stream7->NDTR = strlen(Telemetry_Buffer);
-            USART1->DR = '\r'; /* The Proteus Hack! */
-            DMA2_Stream7->CR |= 1;
+            /* Start DMA using the Custom Driver */
+            Dma_StartTransfer(DMA_ID_2, 7, (uint32)Telemetry_Buffer, strlen(Telemetry_Buffer));
+            USART1->DR = '\r'; /* Proteus Hack */
         }
     }
     else
@@ -168,7 +154,7 @@ void Telemetry_Run(uint8 isMasterFlag)
             trigger_print = 1;
         }
 
-        /* CONDITION 2: Auto*/
+        /* CONDITION 2: Auto-Print */
         if (telemetry_delay_counter >= 150000)
         {
             trigger_print = 1;
@@ -185,14 +171,9 @@ void Telemetry_Run(uint8 isMasterFlag)
                 "--------------------\r\n",
                 GetStateStr(ctxB.currentState), ctxB.currentFloor, ctxB.targetFloor);
 
-            /* Start DMA for the SLAVE */
-            DMA2_Stream7->CR &= ~1;
-            while(DMA2_Stream7->CR & 1);
-            DMA2->HIFCR = (0x3D << 22); /* Clear flags */
-            DMA2_Stream7->M0AR = (uint32)Telemetry_Buffer;
-            DMA2_Stream7->NDTR = strlen(Telemetry_Buffer);
-            USART1->DR = '\r';
-            DMA2_Stream7->CR |= 1;
+            /* Start DMA using Driver */
+            Dma_StartTransfer(DMA_ID_2, 7, (uint32)Telemetry_Buffer, strlen(Telemetry_Buffer));
+            USART1->DR = '\r'; /* Proteus Hack */
         }
     }
 }

@@ -2,6 +2,8 @@
 #include "Spi.h"
 #include "Rcc.h"
 #include "Timer.h"
+#include "stm32f401xe.h"
+
 
 /* ------------------------------------------------------------------ */
 /* IPC Master State Machine                                           */
@@ -87,24 +89,25 @@ void Ipc_MasterRun(IpcPacket_t* txPacket)
 
     spi_delay_counter = 0;
 
+    IpcPacket_t localTxPacket;
+
+    __disable_irq();
+    localTxPacket = *txPacket;
+    __enable_irq();
+
     /* ---------------------------------------------------------
      * SPI Packet Exchange
      * --------------------------------------------------------- */
 
-    uint8* txPtr = (uint8*)txPacket;
+    uint8* txPtr = (uint8*)&localTxPacket;
     uint8* rxPtr = (uint8*)&MasterRxPacket;
 
     uint8 calculatedChecksum = 0;
 
     /* Calculate outgoing packet checksum */
-    txPacket->Checksum =
-        txPacket->Header +
-        txPacket->State +
-        txPacket->CurrentFloor +
-        txPacket->TargetFloor +
-        txPacket->Emergency +
-        txPacket->Reserved1 +
-        txPacket->Reserved2;
+    localTxPacket.Checksum =
+            localTxPacket.Header + localTxPacket.State + localTxPacket.CurrentFloor +
+            localTxPacket.TargetFloor + localTxPacket.Emergency + localTxPacket.Reserved1 + localTxPacket.Reserved2;
 
     /* Assert chip select (active low) */
     Spi4_MasterSetCS(0);
