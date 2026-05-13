@@ -30,7 +30,7 @@ void Dma_StartTransfer(uint8 ControllerId, uint8 StreamNum, uint32 MemAddr, uint
 
     // 1. Stop to Update
     dmaStream->CR &= ~(1U << 0);
-    while(dmaStream->CR & (1U << 0)); // حماية إضافية للتأكد من التوقف
+    while(dmaStream->CR & (1U << 0));
 
     // 2. Clear Flags
     uint32 mask = 0x3D;
