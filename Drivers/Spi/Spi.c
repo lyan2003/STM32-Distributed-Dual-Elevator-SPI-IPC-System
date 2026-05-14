@@ -8,6 +8,18 @@
  * Used only in Slave mode when data is received.
  */
 static Spi_RxCallback_t SlaveRxCallback = NULL;
+/* Variables for Master IT communication */
+static uint8* MasterTxBuffer = NULL;
+static uint8* MasterRxBuffer = NULL;
+static uint16 MasterTransferLength = 0;
+static volatile uint16 MasterTxIndex = 0;
+static volatile uint16 MasterRxIndex = 0;
+static volatile uint8 MasterBusyFlag = 0; // 0 = Idle, 1 = Busy
+static uint8 CurrentSpiMode = SPI_MASTER; // To know what to do in ISR
+
+/* Master complete callback */
+typedef void (*Spi_MasterDoneCallback_t)(void);
+static Spi_MasterDoneCallback_t MasterTxRxDoneCallback = NULL;
 
 
 /*
@@ -64,7 +76,7 @@ void Spi4_Init(uint8 MasterSlave, uint8 ClkPol, uint8 ClkPhase)
         // --------------------------------------------------
         // MASTER CONFIGURATION
         // --------------------------------------------------
-
+        CurrentSpiMode = SPI_MASTER; // Save current mode
         /*
          * PE4 used as software-controlled Chip Select (CS)
          */
@@ -88,13 +100,17 @@ void Spi4_Init(uint8 MasterSlave, uint8 ClkPol, uint8 ClkPhase)
          * SPI Clock = Peripheral Clock / 16
          */
         SPI_REG->CR1 |= (0x03 << 3);
+
+        /* Enable SPI4 interrupt in NVIC for Master */
+        Nvic_SetPriority(84, 1);
+        Nvic_EnableIrq(84);
     }
     else
     {
         // --------------------------------------------------
         // SLAVE CONFIGURATION
         // --------------------------------------------------
-
+        CurrentSpiMode = SPI_SLAVE;
         /*
          * PE4 configured as hardware NSS input
          */
@@ -160,33 +176,72 @@ void Spi4_Init(uint8 MasterSlave, uint8 ClkPol, uint8 ClkPhase)
 
 
 /*
- * Master Transmit / Receive
+ * Master Transmit / Receive (Non-Blocking Interrupt-Based)
  * ----------------------------------------------------------
- * Performs one full-duplex SPI transfer.
- *
- * Every transmitted byte simultaneously receives one byte.
+ * Starts a full-duplex SPI transfer using RXNE interrupts only.
  *
  * Parameters:
- *  TxData -> Byte to send
+ *   txBuf    -> Pointer to transmit buffer
+ *   rxBuf    -> Pointer to receive buffer
+ *   length   -> Number of bytes to transfer
+ *   callback -> Function executed when transfer completes
  *
- * Return:
- *  Received byte from slave
+ * Notes:
+ *   - The transfer is interrupt-driven.
+ *   - RXNE interrupt is used instead of TXE interrupt
+ *     to improve synchronization stability.
+ *   - The first byte is transmitted manually to start
+ *     SPI clock generation.
  */
-uint8 Spi4_MasterTransmitReceive(uint8 TxData)
+void Spi4_MasterTransmitReceive(uint8* txBuf,
+                                uint8* rxBuf,
+                                uint16 length,
+                                Spi_MasterDoneCallback_t callback)
 {
-    /* Wait until transmit buffer becomes empty */
-    while (!(SPI_REG->SR & (1 << 1)));
+    /* Prevent starting a new transfer while SPI is busy */
+    if (MasterBusyFlag == 1 || length == 0)
+        return;
 
-    /* Write data to Data Register */
-    SPI_REG->DR = TxData;
+    /* Mark SPI as busy */
+    MasterBusyFlag = 1;
 
-    /* Wait until receive buffer contains data */
-    while (!(SPI_REG->SR & (1 << 0)));
+    /* Store transfer configuration */
+    MasterTxBuffer = txBuf;
+    MasterRxBuffer = rxBuf;
+    MasterTransferLength = length;
 
-    /* Return received byte */
-    return SPI_REG->DR;
+    /*
+     * Transmission starts from index 1 because
+     * the first byte will be sent manually below.
+     */
+    MasterTxIndex = 1;
+
+    /* No received bytes yet */
+    MasterRxIndex = 0;
+
+    /* Register completion callback */
+    MasterTxRxDoneCallback = callback;
+
+    /*
+     * Enable RXNE interrupt only
+     * --------------------------------------------------
+     * RXNEIE = 1  -> Enable receive interrupt
+     * TXEIE  = 0  -> Disable transmit interrupt
+     *
+     * TXE interrupt is intentionally disabled to avoid
+     * synchronization issues and Proteus simulation hangs.
+     */
+    SPI_REG->CR2 |=  (1 << 6); // RXNEIE
+    SPI_REG->CR2 &= ~(1 << 7); // TXEIE
+
+    /*
+     * Initial transmission
+     * --------------------------------------------------
+     * Send the first byte manually to generate the SPI
+     * clock and trigger the first RXNE interrupt.
+     */
+    SPI_REG->DR = MasterTxBuffer[0];
 }
-
 
 /*
  * Control Chip Select (CS)
@@ -234,27 +289,89 @@ void Spi4_SlavePreloadData(uint8 TxData)
 /*
  * SPI4 Interrupt Handler
  * ----------------------------------------------------------
- * Executed automatically when RXNE interrupt occurs.
+ * This ISR is triggered automatically whenever an SPI4
+ * interrupt occurs.
  *
- * Used only in Slave mode.
+ * Supports:
+ *   - Slave mode reception
+ *   - Master mode full-duplex transfer
  */
 void SPI4_IRQHandler(void)
 {
-    /*
-     * Check RXNE flag:
-     * Indicates new received data is available
-     */
-    if (SPI_REG->SR & (1 << 0))
+    if (CurrentSpiMode == SPI_SLAVE)
     {
-        /* Read received byte */
-        uint8 rxData = SPI_REG->DR;
-
-        /*
-         * Call application callback if registered
+        /* --------------------------------------------------
+         * SLAVE MODE
+         * --------------------------------------------------
+         * Handle received data from the master.
          */
-        if (SlaveRxCallback != NULL)
+        if (SPI_REG->SR & (1 << 0)) // RXNE flag set
         {
-            SlaveRxCallback(rxData);
+            /* Read received byte */
+            uint8 rxData = SPI_REG->DR;
+
+            /* Execute registered callback if available */
+            if (SlaveRxCallback != NULL)
+            {
+                SlaveRxCallback(rxData);
+            }
+        }
+    }
+    else
+    {
+        /* --------------------------------------------------
+         * MASTER MODE
+         * --------------------------------------------------
+         * RXNE-driven full-duplex communication.
+         */
+        if (SPI_REG->SR & (1 << 0)) // RXNE flag set
+        {
+            /* Store received byte from slave */
+            MasterRxBuffer[MasterRxIndex++] = SPI_REG->DR;
+
+            /* Check if more bytes remain to be transmitted */
+            if (MasterTxIndex < MasterTransferLength)
+            {
+                /*
+                 * Small synchronization delay
+                 * --------------------------------------------------
+                 * Gives the slave enough time to:
+                 *   1. Enter its interrupt handler
+                 *   2. Process the received byte
+                 *   3. Prepare the next response byte
+                 *
+                 * Without this delay, the master may clock the next
+                 * transfer too quickly, causing invalid or repeated
+                 * slave data.
+                 */
+                for (volatile int d = 0; d < 300; d++);
+
+                /* Transmit next byte */
+                SPI_REG->DR = MasterTxBuffer[MasterTxIndex++];
+            }
+            else
+            {
+                /*
+                 * Transmission completed
+                 * --------------------------------------------------
+                 * All expected bytes have been transmitted and
+                 * received successfully.
+                 */
+                if (MasterRxIndex == MasterTransferLength)
+                {
+                    /* Disable RXNE interrupt */
+                    SPI_REG->CR2 &= ~(1 << 6);
+
+                    /* Clear busy flag */
+                    MasterBusyFlag = 0;
+
+                    /* Execute completion callback if registered */
+                    if (MasterTxRxDoneCallback != NULL)
+                    {
+                        MasterTxRxDoneCallback();
+                    }
+                }
+            }
         }
     }
 }

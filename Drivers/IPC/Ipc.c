@@ -18,6 +18,9 @@ typedef enum {
 /* Current state of the IPC master */
 static volatile IpcMasterState_t MasterState = IPC_IDLE;
 
+// Buffer to hold TX data during the asynchronous transfer
+static IpcPacket_t AsyncTxPacket;
+
 /* Last received packet from slave */
 IpcPacket_t MasterRxPacket;
 
@@ -35,13 +38,6 @@ static void Ipc_50ms_Callback(void) {
     if (MasterState == IPC_IDLE) {
         MasterState = IPC_CS_ASSERT;
     }
-}
-
-/**
- * @brief Callback used after CS setup delay.
- */
-static void Ipc_CsSetup_Callback(void) {
-    MasterState = IPC_TRANSFERRING;
 }
 
 /* ------------------------------------------------------------------ */
@@ -68,6 +64,29 @@ void Ipc_MasterInit(void) {
     Timer_DelayMsAsync(TIMER2, 50, Ipc_50ms_Callback);
 }
 
+static void Ipc_TransferComplete_Callback(void)
+{
+    /* 1. Release chip select (High) */
+    Spi4_MasterSetCS(1);
+
+    /* 2. Validate received packet */
+    uint8 calculatedChecksum = 0;
+    uint8* rxPtr = (uint8*)&MasterRxPacket;
+
+    if (MasterRxPacket.Header == IPC_HEADER_BYTE) {
+        for (uint8 i = 0; i < 7; i++) {
+            calculatedChecksum += rxPtr[i];
+        }
+        if (calculatedChecksum == MasterRxPacket.Checksum) {
+            Ipc_LastLinkOk = 1;
+        } else {
+            Ipc_LastLinkOk = 0;
+        }
+    } else {
+        Ipc_LastLinkOk = 0;
+    }
+}
+
 /**
  * @brief Perform SPI packet exchange with the slave.
  *
@@ -75,81 +94,38 @@ void Ipc_MasterInit(void) {
  */
 void Ipc_MasterRun(IpcPacket_t* txPacket)
 {
-    /* ---------------------------------------------------------
-     * Software-based non-blocking delay
-     * Controls how often SPI communication is executed.
-     * --------------------------------------------------------- */
     static uint32 spi_delay_counter = 0;
 
     spi_delay_counter++;
-
     if (spi_delay_counter < 15000) {
         return;
     }
-
     spi_delay_counter = 0;
 
-    IpcPacket_t localTxPacket;
-
+    /* Copy packet to our static buffer to keep it alive during IT transfer */
     __disable_irq();
-    localTxPacket = *txPacket;
+    AsyncTxPacket = *txPacket;
     __enable_irq();
 
-    /* ---------------------------------------------------------
-     * SPI Packet Exchange
-     * --------------------------------------------------------- */
-
-    uint8* txPtr = (uint8*)&localTxPacket;
-    uint8* rxPtr = (uint8*)&MasterRxPacket;
-
-    uint8 calculatedChecksum = 0;
-
     /* Calculate outgoing packet checksum */
-    localTxPacket.Checksum =
-            localTxPacket.Header + localTxPacket.State + localTxPacket.CurrentFloor +
-            localTxPacket.TargetFloor + localTxPacket.Emergency + localTxPacket.Reserved1 + localTxPacket.Reserved2;
+    AsyncTxPacket.Checksum =
+            AsyncTxPacket.Header + AsyncTxPacket.State + AsyncTxPacket.CurrentFloor +
+            AsyncTxPacket.TargetFloor + AsyncTxPacket.Emergency + AsyncTxPacket.Reserved1 + AsyncTxPacket.Reserved2;
 
     /* Assert chip select (active low) */
     Spi4_MasterSetCS(0);
 
-    /* Small hardware settle delay */
+    /* Small setup delay for Proteus to recognize CS before Clock starts */
     for (volatile int i = 0; i < 150; i++);
 
-    /* Exchange all packet bytes */
-    for (uint8 i = 0; i < IPC_PACKET_SIZE; i++) {
+    /* * Start Non-Blocking SPI Transfer.
+     * We pass pointers to TX, RX, the size of the packet, and the callback.
+     */
+    uint8* txPtr = (uint8*)&AsyncTxPacket;
+    uint8* rxPtr = (uint8*)&MasterRxPacket;
 
-        rxPtr[i] = Spi4_MasterTransmitReceive(txPtr[i]);
-
-        /* Small spacing delay between bytes */
-        for (volatile int d = 0; d < 250; d++);
-    }
-
-    /* Release chip select */
-    Spi4_MasterSetCS(1);
-
-    /* ---------------------------------------------------------
-     * Validate received packet
-     * --------------------------------------------------------- */
-
-    if (MasterRxPacket.Header == IPC_HEADER_BYTE) {
-
-        /* Recalculate checksum */
-        for (uint8 i = 0; i < 7; i++) {
-            calculatedChecksum += rxPtr[i];
-        }
-
-        /* Verify checksum */
-        if (calculatedChecksum == MasterRxPacket.Checksum) {
-            Ipc_LastLinkOk = 1;
-        } else {
-            Ipc_LastLinkOk = 0;
-        }
-
-    } else {
-
-        /* Invalid header detected */
-        Ipc_LastLinkOk = 0;
-    }
+    // Replace Spi4_MasterTransmitReceive with the new IT function
+    Spi4_MasterTransmitReceive(txPtr, rxPtr, IPC_PACKET_SIZE, Ipc_TransferComplete_Callback);
 }
 
 /**

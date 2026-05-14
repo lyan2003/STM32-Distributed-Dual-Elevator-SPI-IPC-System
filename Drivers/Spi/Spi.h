@@ -29,15 +29,29 @@ typedef struct {
 #define SPI_SAMPLE_FIRST_TRANSITION  0
 #define SPI_SAMPLE_SECOND_TRANSITION 1
 
-/* Callbacks for Non-Blocking Slave */
+/* ==================================================================== */
+/* Callbacks Definitions                                                */
+/* ==================================================================== */
+
+/* Callback for Slave: Triggered when a single byte is received */
 typedef void (*Spi_RxCallback_t)(uint8 rxData);
 
-/* Public API */
+/* Callback for Master: Triggered when the full buffer transfer is done */
+typedef void (*Spi_MasterDoneCallback_t)(void);
+
+/* ==================================================================== */
+/* Public API                                                           */
+/* ==================================================================== */
+
 void Spi4_Init(uint8 MasterSlave, uint8 ClkPol, uint8 ClkPhase);
-uint8 Spi4_MasterTransmitReceive(uint8 TxData);
+
+/* Master Non-Blocking Transmit/Receive using Interrupts */
+void Spi4_MasterTransmitReceive(uint8* txBuf, uint8* rxBuf, uint16 length, Spi_MasterDoneCallback_t callback);
+void Spi4_MasterSetCS(uint8 state);
+
+/* Slave API */
 void Spi4_SetSlaveCallback(Spi_RxCallback_t callback);
 void Spi4_SlavePreloadData(uint8 TxData);
 
-void Spi4_MasterSetCS(uint8 state);
 
 #endif /* SPI_H */
