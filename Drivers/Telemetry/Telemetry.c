@@ -9,9 +9,15 @@
 #include <stdio.h>
 #include <string.h>
 #include "stm32f401xe.h"
-
+#include "Timer.h"
 /* Large buffer to hold the report before handing it to the DMA */
 char Telemetry_Buffer[512];
+static volatile uint8 telemetry_time_up = 0;
+
+void Telemetry_TimerCallback(void)
+{
+    telemetry_time_up = 1;
+}
 
 /* DMA configuration for USART1 Transmission */
 Dma_ConfigType UartTxDma = {
@@ -42,6 +48,7 @@ void Telemetry_Init(uint8 isMasterFlag)
     /* 1. Enable Clocks */
     Rcc_Enable(RCC_GPIOA);
     Rcc_Enable(RCC_USART1);
+    Rcc_Enable(RCC_TIM3);
 
     /* Force enable DMA2 clock */
     RCC->AHB1ENR |= (1 << 22);
@@ -50,14 +57,14 @@ void Telemetry_Init(uint8 isMasterFlag)
     Gpio_Init(GPIO_A, 9, GPIO_AF, GPIO_PUSH_PULL);
     Gpio_ConfigAF(GPIO_A, 9, 7);
 
-    Gpio_Init(GPIO_A, 10, GPIO_AF, GPIO_PULL_UP);
+    Gpio_Init(GPIO_A, 10, GPIO_AF, GPIO_PUSH_PULL);
     Gpio_ConfigAF(GPIO_A, 10, 7);
 
     /* 3. Initialize USART */
     Usart1_Init();
 
     /* Enable UART to use DMA */
-    USART1->CR3 |= (1 << 7); /* Enable DMAT (DMA Transmit Enable) bit */
+    // USART1->CR3 |= (1 << 7); /* Enable DMAT (DMA Transmit Enable) bit */
 
     /* 4. Initialize DMA Stream using Custom Driver */
     Dma_InitStream(&UartTxDma);
@@ -69,6 +76,8 @@ void Telemetry_Init(uint8 isMasterFlag)
     /* Start the initial transfer */
     Dma_StartTransfer(DMA_ID_2, 7, (uint32)Telemetry_Buffer, strlen(Telemetry_Buffer));
     USART1->DR = '\r'; /* Proteus workaround */
+
+    Timer_DelayMsAsync(TIMER3, 5000, Telemetry_TimerCallback);
 }
 
 /* ------------------------------------------------------------------ */
@@ -85,8 +94,8 @@ void Telemetry_Run(uint8 isMasterFlag)
     }
 
     /* Software Non-Blocking Timer Counter */
-    static uint32 telemetry_delay_counter = 0;
-    telemetry_delay_counter++;
+    // static uint32 telemetry_delay_counter = 0;
+    // telemetry_delay_counter++;
 
     /* Flag to decide if we fire the DMA this loop */
     uint8 trigger_print = 0;
@@ -113,17 +122,17 @@ void Telemetry_Run(uint8 isMasterFlag)
             trigger_print = 1; /* Force an instant print */
         }
 
-        /* CONDITION 2: Auto-Print (500ms elapsed) */
-        if (telemetry_delay_counter >= 150000)
-        {
-            trigger_print = 1;
-        }
 
+        if (telemetry_time_up) {
+            trigger_print = 1;
+            telemetry_time_up = 0; /* Clear the flag immediately */
+
+            /* Restart the timer for the next exactly 500ms cycle */
+            Timer_DelayMsAsync(TIMER3, 5000, Telemetry_TimerCallback);
+        }
         /* Execute the DMA Transfer if either condition was met */
         if (trigger_print)
         {
-            /* Reset the timer */
-            telemetry_delay_counter = 0;
 
             /* Assemble the entire report into the buffer at once */
             sprintf(Telemetry_Buffer,
@@ -154,15 +163,18 @@ void Telemetry_Run(uint8 isMasterFlag)
             trigger_print = 1;
         }
 
-        /* CONDITION 2: Auto-Print */
-        if (telemetry_delay_counter >= 150000)
+        if (telemetry_time_up)
         {
             trigger_print = 1;
+            telemetry_time_up = 0; /* Clear the flag immediately */
+
+            /* Restart the timer for the next exactly 500ms cycle */
+            Timer_DelayMsAsync(TIMER3, 5000, Telemetry_TimerCallback);
         }
 
         if (trigger_print)
         {
-            telemetry_delay_counter = 0;
+
 
             /* Assemble the entire report into the buffer at once */
             sprintf(Telemetry_Buffer,
