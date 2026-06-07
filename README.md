@@ -4,7 +4,7 @@ A production-grade, distributed reactive software architecture implemented entir
 
 ### Project Demonstration and Simulation Walkthrough
 The firmware exhibits real-time asynchronous event routing, hardware-level packet serialization, distributed finite state synchronization, and high-priority NVIC preemption under emergency failure modes:
-* **[Watch System Walkthrough and Simulation Video](https://github.com/sbme-tutorials/finalproject-collaborative-dual-elevator-system-over-spi-ipc-sbe27-embedded-spring26-team11.git)**
+* **[Watch System Walkthrough and Simulation Video]()**
 
 ---
 
